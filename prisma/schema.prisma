@@ -1,0 +1,298 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+enum Role {
+  INCIDENT_MANAGER
+  SECURITY_LEAD
+  COMMUNICATIONS_OFFICER
+  LEGAL_COUNSEL
+  EXECUTIVE_REVIEWER
+  AUDITOR
+}
+
+enum IncidentSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum IncidentStatus {
+  ACTIVE
+  CONTAINED
+  RESOLVED
+  CLOSED
+}
+
+enum EpistemicStatus {
+  CONFIRMED
+  SUSPECTED
+  UNKNOWN
+  DISPUTED
+}
+
+enum AudienceType {
+  EXECUTIVE
+  ENGINEERING
+  ALL_HANDS
+  CUSTOMER
+  REGULATORY
+}
+
+enum DraftStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  INVALIDATED
+  EXPORTED
+}
+
+enum ReadinessState {
+  BLOCKED
+  NEEDS_REVIEW
+  REVIEW_READY
+}
+
+enum ReliabilityTier {
+  OFFICIAL_VENDOR
+  CISA_NVD
+  THREAT_INTEL
+  COMMUNITY
+  UNVERIFIED
+}
+
+model Organization {
+  id                   String                      @id @default(cuid())
+  name                 String
+  slug                 String                      @unique
+  domain               String?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  users                User[]
+  incidents            Incident[]
+  templates            ApprovedTemplate[]
+  terminology          OrganizationalTerminology[]
+  auditLogs            AuditLog[]
+}
+
+model User {
+  id             String             @id @default(cuid())
+  name           String?
+  email          String             @unique
+  emailVerified  DateTime?
+  passwordHash   String?
+  image          String?
+  role           Role               @default(COMMUNICATIONS_OFFICER)
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  accounts       Account[]
+  sessions       Session[]
+  incidentsCreated Incident[]       @relation("CreatedIncidents")
+  draftsCreated  CommunicationDraft[] @relation("CreatedDrafts")
+  approvals      ApprovalEvent[]
+  auditLogs      AuditLog[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([organizationId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Incident {
+  id                      String              @id @default(cuid())
+  incidentNumber          String              @unique
+  title                   String
+  description             String              @db.Text
+  category                String
+  severity                IncidentSeverity    @default(HIGH)
+  status                  IncidentStatus      @default(ACTIVE)
+  organizationId          String
+  organization            Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById             String
+  createdBy               User                @relation("CreatedIncidents", fields: [createdById], references: [id])
+  
+  // Epistemic Status Grounding Fields
+  discoveryTime           DateTime            @default(now())
+  
+  accessScopeStatus       EpistemicStatus     @default(UNKNOWN)
+  accessScopeDetails      String?             @db.Text
+  
+  exfiltrationStatus      EpistemicStatus     @default(UNKNOWN)
+  exfiltrationDetails     String?             @db.Text
+  
+  rootCauseStatus         EpistemicStatus     @default(UNKNOWN)
+  rootCauseDetails        String?             @db.Text
+  
+  affectedSystemsStatus   EpistemicStatus     @default(UNKNOWN)
+  affectedSystemsDetails  String?             @db.Text
+  
+  mitigationStatus        EpistemicStatus     @default(SUSPECTED)
+  mitigationDetails       String?             @db.Text
+  
+  regulatoryApplicability String?
+  
+  advisories              ExternalAdvisory[]
+  drafts                  CommunicationDraft[]
+  auditLogs               AuditLog[]
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  @@index([organizationId])
+  @@index([incidentNumber])
+}
+
+model ExternalAdvisory {
+  id              String          @id @default(cuid())
+  incidentId      String
+  incident        Incident        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  sourceUrl       String
+  sourceDomain    String
+  reliabilityTier ReliabilityTier @default(COMMUNITY)
+  isQuarantined   Boolean         @default(false)
+  flagReason      String?
+  rawContent      String?         @db.Text
+  cleanMarkdown   String          @db.Text
+  metadataJson    String?         @db.Text
+  fetchedAt       DateTime        @default(now())
+
+  @@index([incidentId])
+}
+
+model ApprovedTemplate {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  audience          AudienceType
+  title             String
+  mandatorySections String       @db.Text
+  templateBody      String       @db.Text
+  version           Int          @default(1)
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([organizationId, audience])
+}
+
+model OrganizationalTerminology {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  term               String
+  approvedDefinition String       @db.Text
+  forbiddenSynonyms  String       @db.Text
+  category           String       @default("GENERAL")
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([organizationId, term])
+}
+
+model CommunicationDraft {
+  id             String          @id @default(cuid())
+  incidentId     String
+  incident       Incident        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  audience       AudienceType
+  version        Int             @default(1)
+  status         DraftStatus     @default(DRAFT)
+  bodyText       String          @db.Text
+  claimsJson     String          @db.Text
+  readinessGate  ReadinessState  @default(BLOCKED)
+  qualityScore   Float           @default(0.0)
+  qualityBreakdown String?       @db.Text
+  
+  contentHash    String
+  factsHash      String
+  approvalDigest String?
+  
+  createdById    String
+  createdBy      User            @relation("CreatedDrafts", fields: [createdById], references: [id])
+  approvals      ApprovalEvent[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([incidentId, audience])
+}
+
+model ApprovalEvent {
+  id             String             @id @default(cuid())
+  draftId        String
+  draft          CommunicationDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  reviewerId     String
+  reviewer       User               @relation(fields: [reviewerId], references: [id])
+  reviewerRole   Role
+  action         String
+  decisionDigest String
+  rationale      String?            @db.Text
+  timestamp      DateTime           @default(now())
+
+  @@index([draftId])
+}
+
+model AuditLog {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  incidentId        String?
+  incident          Incident?    @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+  actorId           String
+  actor             User         @relation(fields: [actorId], references: [id])
+  actorEmail        String
+  actorRole         Role
+  action            String
+  entityType        String
+  entityId          String
+  previousStateHash String?
+  newStateHash      String?
+  metadataJson      String?      @db.Text
+  timestamp         DateTime     @default(now())
+
+  @@index([organizationId, incidentId])
+  @@index([timestamp])
+}
