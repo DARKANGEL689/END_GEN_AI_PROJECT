@@ -1,19 +1,34 @@
-export interface ExportPayload {
+export type ExportFormat = 'DOCX' | 'MARKDOWN' | 'HTML';
+
+export interface ExportDraftInput {
   incidentNumber: string;
   incidentTitle: string;
   severity: string;
   audience: string;
   version: number;
-  approvedAt: Date;
-  approvedBy: string;
-  approvedRole: string;
-  approvalDigest: string;
+  status: string;
   bodyText: string;
-  claimsCount: number;
-  qualityScore: number;
+  contentHash: string;
+  factsHash: string;
+  approvalDigest?: string | null;
+  approvedBy?: {
+    name: string;
+    email: string;
+    role: string;
+  } | null;
+  approvedAt?: Date | null;
+  organizationName: string;
+  isSynthetic: boolean;
+}
+
+export interface ExportResult {
+  filename: string;
+  contentType: string;
+  buffer: Buffer;
 }
 
 export interface ExportProvider {
-  generateDocx(payload: ExportPayload): Promise<Buffer>;
-  generatePdf(payload: ExportPayload): Promise<Buffer>;
+  exportDocx(input: ExportDraftInput): Promise<Buffer>;
+  exportMarkdown(input: ExportDraftInput): Promise<string>;
+  exportHtml(input: ExportDraftInput): Promise<string>;
 }

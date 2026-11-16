@@ -17,8 +17,21 @@ import {
   Hash,
   Send,
   RefreshCw,
+  Download,
+  Edit3,
+  CheckCheck,
+  XCircle,
+  FileDown,
+  Check,
+  X,
 } from 'lucide-react';
-import { generateDraftAction, generateAllDraftsAction } from '@/app/drafts/actions';
+import {
+  generateDraftAction,
+  generateAllDraftsAction,
+  requestReviewAction,
+  submitApprovalAction,
+  editDraftAction,
+} from '@/app/drafts/actions';
 import type { AudienceType, ReadinessState } from '@prisma/client';
 import type { AtomicClaim } from '@/domain/entities/claim';
 
@@ -72,7 +85,14 @@ export function DraftStudio({
   const [drafts, setDrafts] = useState<DraftData[]>(initialDrafts);
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [generationNotice, setGenerationNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Modals state
+  const [isSignModalOpen, setIsSignModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [signRationale, setSignRationale] = useState('');
+  const [editText, setEditText] = useState('');
+  const [editRationale, setEditRationale] = useState('');
 
   const activeDraft = drafts.find(
     (d) => d.incidentId === selectedIncidentId && d.audience === selectedAudience
@@ -99,56 +119,115 @@ export function DraftStudio({
   const activeClaim = parsedClaims.find((c) => c.id === selectedClaimId);
 
   const handleGenerateSingle = () => {
-    setGenerationNotice(null);
+    setNotice(null);
     startTransition(async () => {
       try {
         const res = await generateDraftAction(selectedIncidentId, selectedAudience);
         if (res.success && res.result) {
-          setGenerationNotice(`Successfully synthesized grounded draft for ${selectedAudience} (v${res.result.version}).`);
-          // Update local state
-          const newDraft: DraftData = {
-            id: res.result.draftId,
-            incidentId: selectedIncidentId,
-            audience: res.result.audience,
-            version: res.result.version,
-            status: 'DRAFT',
-            bodyText: res.result.bodyText,
-            claimsJson: JSON.stringify(parsedClaims), // will be updated on refresh
-            readinessGate: res.result.readinessState,
-            qualityScore: res.result.qualityScore,
-            qualityBreakdown: JSON.stringify({ quality: res.result.qualityBreakdown }),
-            contentHash: res.result.contentHash,
-            factsHash: res.result.factsHash,
-            approvalDigest: null,
-            createdBy: { name: 'Comms Officer', email: 'comms@sentineldefense.internal', role: 'COMMUNICATIONS_OFFICER' },
-            createdAt: new Date(),
-          };
-          setDrafts((prev) => [newDraft, ...prev.filter((d) => !(d.incidentId === selectedIncidentId && d.audience === selectedAudience))]);
-          // auto-select first claim if available
-          if (parsedClaims.length > 0) {
-            setSelectedClaimId(parsedClaims[0].id);
-          }
+          setNotice(`Generated draft for ${selectedAudience} (v${res.result.version}).`);
           window.location.reload();
         }
       } catch (err: any) {
-        setGenerationNotice(`Generation failed: ${err.message}`);
+        setNotice(`Generation failed: ${err.message}`);
       }
     });
   };
 
   const handleGenerateAll = () => {
-    setGenerationNotice(null);
+    setNotice(null);
     startTransition(async () => {
       try {
         const res = await generateAllDraftsAction(selectedIncidentId);
         if (res.success && res.results) {
-          setGenerationNotice(`Generated all 5 grounded audience drafts in parallel.`);
+          setNotice(`Generated all 5 grounded audience drafts in parallel.`);
           window.location.reload();
         }
       } catch (err: any) {
-        setGenerationNotice(`All-audience generation failed: ${err.message}`);
+        setNotice(`All-audience generation failed: ${err.message}`);
       }
     });
+  };
+
+  const handleRequestReview = () => {
+    if (!activeDraft) return;
+    setNotice(null);
+    startTransition(async () => {
+      try {
+        await requestReviewAction(activeDraft.id, selectedIncidentId);
+        setNotice(`Draft submitted for formal Legal & Executive review.`);
+        window.location.reload();
+      } catch (err: any) {
+        setNotice(`Review request rejected: ${err.message}`);
+      }
+    });
+  };
+
+  const handleApprove = () => {
+    if (!activeDraft) return;
+    setNotice(null);
+    startTransition(async () => {
+      try {
+        const res = await submitApprovalAction(
+          activeDraft.id,
+          selectedIncidentId,
+          'APPROVE',
+          signRationale || 'Approved for external / internal distribution'
+        );
+        setIsSignModalOpen(false);
+        setNotice(`Draft successfully approved and cryptographically signed. Digest: ${res.result.decisionDigest.slice(0, 16)}...`);
+        window.location.reload();
+      } catch (err: any) {
+        setNotice(`Approval failed: ${err.message}`);
+      }
+    });
+  };
+
+  const handleReject = () => {
+    if (!activeDraft) return;
+    setNotice(null);
+    startTransition(async () => {
+      try {
+        await submitApprovalAction(
+          activeDraft.id,
+          selectedIncidentId,
+          'REJECT',
+          signRationale || 'Rejected by reviewer with feedback'
+        );
+        setIsSignModalOpen(false);
+        setNotice(`Draft was marked REJECTED.`);
+        window.location.reload();
+      } catch (err: any) {
+        setNotice(`Rejection action failed: ${err.message}`);
+      }
+    });
+  };
+
+  const handleSaveEdit = () => {
+    if (!activeDraft) return;
+    setNotice(null);
+    startTransition(async () => {
+      try {
+        await editDraftAction(
+          activeDraft.id,
+          selectedIncidentId,
+          editText,
+          editRationale || 'Manual draft revision'
+        );
+        setIsEditModalOpen(false);
+        setNotice(`Draft revised to v${activeDraft.version + 1}. Previous approvals revoked.`);
+        window.location.reload();
+      } catch (err: any) {
+        setNotice(`Draft update failed: ${err.message}`);
+      }
+    });
+  };
+
+  const openEditModal = () => {
+    if (activeDraft) {
+      setEditText(activeDraft.bodyText);
+      setEditRationale('');
+      setIsEditModalOpen(true);
+    }
   };
 
   // Helper to render markdown text with interactive claim tags
@@ -242,10 +321,10 @@ export function DraftStudio({
         </div>
       </div>
 
-      {generationNotice && (
+      {notice && (
         <div className="p-3 text-xs rounded-lg bg-cyan-950/40 border border-cyan-800/60 text-cyan-300 flex items-center gap-2">
           <Info className="w-4 h-4 flex-shrink-0" />
-          <span>{generationNotice}</span>
+          <span>{notice}</span>
         </div>
       )}
 
@@ -281,14 +360,16 @@ export function DraftStudio({
                 {draftForAud ? (
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                      draftForAud.readinessGate === 'REVIEW_READY'
+                      draftForAud.status === 'APPROVED'
                         ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
-                        : draftForAud.readinessGate === 'NEEDS_REVIEW'
-                        ? 'bg-amber-950 text-amber-400 border border-amber-800/50'
-                        : 'bg-rose-950 text-rose-400 border border-rose-800/50'
+                        : draftForAud.status === 'PENDING_REVIEW'
+                        ? 'bg-indigo-950 text-indigo-400 border border-indigo-800/50'
+                        : draftForAud.status === 'REJECTED'
+                        ? 'bg-rose-950 text-rose-400 border border-rose-800/50'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700'
                     }`}
                   >
-                    {draftForAud.readinessGate}
+                    {draftForAud.status}
                   </span>
                 ) : (
                   <span className="text-[10px] text-slate-600 font-mono">NO DRAFT</span>
@@ -304,34 +385,53 @@ export function DraftStudio({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Main Content Area: Draft Body & Quality Breakdown */}
           <div className="lg:col-span-8 space-y-6">
-            {/* Trust Engine Status Banner */}
+            {/* Trust Engine Status Banner & Governance Toolbar */}
             <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Workflow Status Badge */}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-xs px-2.5 py-1 rounded-md font-mono font-bold uppercase ${
+                      activeDraft.status === 'APPROVED'
+                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/60 shadow-sm shadow-emerald-900/30'
+                        : activeDraft.status === 'PENDING_REVIEW'
+                        ? 'bg-indigo-950 text-indigo-300 border border-indigo-700/60'
+                        : activeDraft.status === 'REJECTED'
+                        ? 'bg-rose-950 text-rose-400 border border-rose-700/60'
+                        : activeDraft.status === 'INVALIDATED'
+                        ? 'bg-amber-950 text-amber-400 border border-amber-700/60'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700'
+                    }`}
+                  >
+                    {activeDraft.status}
+                  </span>
+                </div>
+
                 {/* Readiness Gate Badge */}
                 <div className="flex items-center gap-2">
                   {activeDraft.readinessGate === 'REVIEW_READY' ? (
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-600/60 text-emerald-400 shadow-sm shadow-emerald-900/40">
-                      <ShieldCheck className="w-4 h-4" />
-                      <span className="text-xs font-mono font-bold">REVIEW_READY</span>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/80 border border-emerald-600/60 text-emerald-400 text-xs font-mono font-bold">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>REVIEW_READY</span>
                     </div>
                   ) : activeDraft.readinessGate === 'NEEDS_REVIEW' ? (
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/80 border border-amber-600/60 text-amber-400">
-                      <AlertTriangle className="w-4 h-4" />
-                      <span className="text-xs font-mono font-bold">NEEDS_REVIEW</span>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-950/80 border border-amber-600/60 text-amber-400 text-xs font-mono font-bold">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>NEEDS_REVIEW</span>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-950/80 border border-rose-600/60 text-rose-400">
-                      <ShieldAlert className="w-4 h-4" />
-                      <span className="text-xs font-mono font-bold">BLOCKED</span>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-950/80 border border-rose-600/60 text-rose-400 text-xs font-mono font-bold">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      <span>BLOCKED</span>
                     </div>
                   )}
                 </div>
 
-                {/* Quality Score Meter */}
-                <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-950 border border-slate-800">
-                  <span className="text-xs text-slate-400">Quality Score:</span>
+                {/* Quality Score */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-950 border border-slate-800 text-xs">
+                  <span className="text-slate-400">Quality:</span>
                   <span
-                    className={`text-sm font-mono font-black ${
+                    className={`font-mono font-bold ${
                       activeDraft.qualityScore >= 85
                         ? 'text-emerald-400'
                         : activeDraft.qualityScore >= 70
@@ -343,24 +443,101 @@ export function DraftStudio({
                   </span>
                 </div>
 
-                <div className="text-xs text-slate-400 font-mono">
-                  v{activeDraft.version} • {parsedClaims.length} Claims Verified
-                </div>
+                <div className="text-xs text-slate-400 font-mono">v{activeDraft.version}</div>
               </div>
 
-              {/* Cryptographic Digests */}
-              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
-                <span title={`Facts Hash: ${activeDraft.factsHash}`} className="flex items-center gap-1">
-                  <Lock className="w-3 h-3 text-cyan-400" />
-                  Facts:{activeDraft.factsHash.slice(0, 8)}...
-                </span>
-                <span>•</span>
-                <span title={`Content Hash: ${activeDraft.contentHash}`} className="flex items-center gap-1">
-                  <Hash className="w-3 h-3 text-indigo-400" />
-                  Content:{activeDraft.contentHash.slice(0, 8)}...
-                </span>
+              {/* Action Buttons: Request Review, Review & Sign, Edit, Export */}
+              <div className="flex flex-wrap items-center gap-2">
+                {activeDraft.status === 'DRAFT' && (
+                  <button
+                    onClick={handleRequestReview}
+                    disabled={isPending || activeDraft.readinessGate === 'BLOCKED'}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Request Review
+                  </button>
+                )}
+
+                {(activeDraft.status === 'PENDING_REVIEW' || activeDraft.status === 'DRAFT') && (
+                  <button
+                    onClick={() => {
+                      setSignRationale('');
+                      setIsSignModalOpen(true);
+                    }}
+                    disabled={isPending || activeDraft.readinessGate === 'BLOCKED'}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 transition-colors disabled:opacity-50"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" />
+                    Review & Sign
+                  </button>
+                )}
+
+                <button
+                  onClick={openEditModal}
+                  disabled={isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors disabled:opacity-50"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                  Edit Revision
+                </button>
+
+                {/* Multi-Format Export Dropdown / Links */}
+                <div className="flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5">
+                  <a
+                    href={`/api/drafts/${activeDraft.id}/export?format=docx`}
+                    download
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-cyan-400 transition-colors"
+                    title="Export as DOCX Word Document"
+                  >
+                    <FileDown className="w-3 h-3 text-cyan-400" />
+                    DOCX
+                  </a>
+                  <span className="text-slate-700">|</span>
+                  <a
+                    href={`/api/drafts/${activeDraft.id}/export?format=md`}
+                    download
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-cyan-400 transition-colors"
+                    title="Export as Markdown"
+                  >
+                    MD
+                  </a>
+                  <span className="text-slate-700">|</span>
+                  <a
+                    href={`/api/drafts/${activeDraft.id}/export?format=html`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-cyan-400 transition-colors"
+                    title="View / Print HTML"
+                  >
+                    HTML
+                  </a>
+                </div>
               </div>
             </div>
+
+            {/* Approved Cryptographic Stamp Banner */}
+            {activeDraft.status === 'APPROVED' && activeDraft.approvalDigest && (
+              <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-600/50 flex flex-col md:flex-row md:items-center justify-between gap-3 text-emerald-300 shadow-lg shadow-emerald-950/40">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-emerald-900/60 border border-emerald-700 text-emerald-300">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-200">
+                      Cryptographically Signed & Approved for Distribution
+                    </h4>
+                    <p className="text-[11px] text-emerald-400 font-mono">
+                      Signature Digest: {activeDraft.approvalDigest}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right text-[11px] font-mono text-emerald-400">
+                  <div>Content: {activeDraft.contentHash.slice(0, 10)}...</div>
+                  <div>Facts: {activeDraft.factsHash.slice(0, 10)}...</div>
+                </div>
+              </div>
+            )}
 
             {/* Quality Dimensions Breakdown Accordion */}
             {parsedBreakdown?.quality && (
@@ -545,6 +722,146 @@ export function DraftStudio({
             {isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             Generate {selectedAudience} Draft
           </button>
+        </div>
+      )}
+
+      {/* Review & Sign Modal */}
+      {isSignModalOpen && activeDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="w-full max-w-md p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <CheckCheck className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-base font-bold text-slate-100">Review & Sign Draft</h3>
+              </div>
+              <button
+                onClick={() => setIsSignModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Audience:</span>
+                <span className="font-semibold text-cyan-400">{activeDraft.audience}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Draft Version:</span>
+                <span className="font-mono text-slate-200">v{activeDraft.version}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Quality Score:</span>
+                <span className="font-mono text-emerald-400 font-bold">{Math.round(activeDraft.qualityScore)}/100</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Content Hash:</span>
+                <span className="font-mono text-slate-400">{activeDraft.contentHash.slice(0, 16)}...</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Facts Hash:</span>
+                <span className="font-mono text-slate-400">{activeDraft.factsHash.slice(0, 16)}...</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">
+                Reviewer Rationale & Notes
+              </label>
+              <textarea
+                value={signRationale}
+                onChange={(e) => setSignRationale(e.target.value)}
+                placeholder="Confirming facts alignment against latest forensic logs and external guidance..."
+                rows={3}
+                className="w-full p-2.5 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                onClick={handleReject}
+                disabled={isPending}
+                className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800/60 transition-colors disabled:opacity-50"
+              >
+                Reject Draft
+              </button>
+              <button
+                onClick={handleApprove}
+                disabled={isPending}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 transition-colors shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+              >
+                <Check className="w-4 h-4" />
+                Approve & Digitally Sign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Edit Revision Modal */}
+      {isEditModalOpen && activeDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="w-full max-w-2xl p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-base font-bold text-slate-100">
+                  Edit Revision (Will become v{activeDraft.version + 1})
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>Warning:</strong> Modifying text alters the SHA-256 content hash and will immediately revoke any active legal/executive approval seal.
+              </span>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">Draft Markdown Body</label>
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                rows={12}
+                className="w-full p-3 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-slate-200 leading-relaxed focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">Revision Rationale</label>
+              <input
+                type="text"
+                value={editRationale}
+                onChange={(e) => setEditRationale(e.target.value)}
+                placeholder="Reason for revision..."
+                className="w-full p-2.5 text-xs bg-slate-950 border border-slate-800 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={isPending || !editText.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 transition-colors disabled:opacity-50"
+              >
+                Save New Revision & Revoke Prior Approval
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
