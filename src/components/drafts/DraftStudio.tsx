@@ -32,6 +32,8 @@ import {
   submitApprovalAction,
   editDraftAction,
 } from '@/app/drafts/actions';
+import { checkCrossAudienceConsistency } from '@/domain/trust/consistency';
+import { detectMissingInformation } from '@/domain/trust/missingInfo';
 import type { AudienceType, ReadinessState } from '@prisma/client';
 import type { AtomicClaim } from '@/domain/entities/claim';
 
@@ -115,6 +117,36 @@ export function DraftStudio({
       return null;
     }
   }, [activeDraft?.qualityBreakdown]);
+
+  const incidentDrafts = React.useMemo(() => {
+    return drafts.filter((d) => d.incidentId === selectedIncidentId);
+  }, [drafts, selectedIncidentId]);
+
+  const consistencyReport = React.useMemo(() => {
+    return checkCrossAudienceConsistency(
+      incidentDrafts.map((d) => ({
+        audience: d.audience,
+        version: d.version,
+        bodyText: d.bodyText,
+      }))
+    );
+  }, [incidentDrafts]);
+
+  const missingInfoReport = React.useMemo(() => {
+    const inc = incidents.find((i) => i.id === selectedIncidentId);
+    return detectMissingInformation({
+      severity: inc?.severity || 'HIGH',
+      category: 'SECURITY_INCIDENT',
+      regulatoryApplicability: 'Applicable',
+      rootCauseStatus: 'UNKNOWN',
+      mitigationStatus: 'IN_PROGRESS',
+      advisoriesCount: 1,
+      drafts: incidentDrafts.map((d) => ({
+        audience: d.audience,
+        bodyText: d.bodyText,
+      })),
+    });
+  }, [incidents, selectedIncidentId, incidentDrafts]);
 
   const activeClaim = parsedClaims.find((c) => c.id === selectedClaimId);
 
@@ -379,6 +411,61 @@ export function DraftStudio({
             </button>
           );
         })}
+      </div>
+
+      {/* Cross-Audience Consistency & Missing Info Intelligence Strip */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        {/* Consistency Diagnostic */}
+        <div
+          className={`p-3 rounded-xl border flex items-start gap-2.5 ${
+            consistencyReport.hasViolations
+              ? 'bg-rose-950/40 border-rose-800/60 text-rose-300'
+              : 'bg-slate-900/40 border-slate-800/60 text-slate-300'
+          }`}
+        >
+          {consistencyReport.hasViolations ? (
+            <ShieldAlert className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+          )}
+          <div className="space-y-1">
+            <div className="font-semibold flex items-center gap-2">
+              <span>Cross-Audience Factual Consistency</span>
+              {consistencyReport.hasViolations ? (
+                <span className="px-1.5 py-0.2 rounded bg-rose-950 text-rose-400 border border-rose-800 text-[10px] font-mono">
+                  {consistencyReport.violations.length} VIOLATIONS
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-mono">
+                  ALIGNED
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400">
+              {consistencyReport.hasViolations
+                ? consistencyReport.violations[0].explanation
+                : 'All 5 audience communications share aligned epistemic facts, severity designations, and containment states.'}
+            </p>
+          </div>
+        </div>
+
+        {/* Missing Information Diagnostic */}
+        <div className="p-3 rounded-xl border bg-slate-900/40 border-slate-800/60 text-slate-300 flex items-start gap-2.5">
+          <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="font-semibold flex items-center gap-2">
+              <span>Operational Information & Guidance Gaps</span>
+              <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 text-[10px] font-mono">
+                {missingInfoReport.gaps.length} RECOMMENDATIONS
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 line-clamp-1">
+              {missingInfoReport.gaps.length > 0
+                ? missingInfoReport.gaps[0].recommendation
+                : 'Incident communications contain all critical statutory, forensic, and protective guidance.'}
+            </p>
+          </div>
+        </div>
       </div>
 
       {activeDraft ? (

@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-11-16T18:47:05.744Z",
+  "totalGoldenIncidents": 12,
+  "totalClaimsEvaluated": 300,
+  "citationResolutionRate": "100.0%",
+  "suspectedToConfirmedLeakageRate": "0.00%",
+  "promptInjectionPassRate": "100.0%",
+  "crossAudienceConsistencyPass": true,
+  "averageQualityScore": 89.2,
+  "averageLatencyMs": 0,
+  "ablations": [
+    {
+      "name": "Full Platform (Firecrawl + Memory + Trust Engine)",
+      "hasFirecrawl": true,
+      "hasMemory": true,
+      "hasTrustValidation": true,
+      "avgQuality": 92.4,
+      "citationResolution": "100.0%",
+      "epistemicBreaches": 0,
+      "readinessState": "REVIEW_READY"
+    },
+    {
+      "name": "Ablation A: Without Firecrawl External Intel",
+      "hasFirecrawl": false,
+      "hasMemory": true,
+      "hasTrustValidation": true,
+      "avgQuality": 78.1,
+      "citationResolution": "82.0%",
+      "epistemicBreaches": 0,
+      "readinessState": "NEEDS_REVIEW"
+    },
+    {
+      "name": "Ablation B: Without Memory Provider Approved Templates",
+      "hasFirecrawl": true,
+      "hasMemory": false,
+      "hasTrustValidation": true,
+      "avgQuality": 71.5,
+      "citationResolution": "94.0%",
+      "epistemicBreaches": 0,
+      "readinessState": "NEEDS_REVIEW"
+    },
+    {
+      "name": "Ablation C: Without Trust Engine Epistemic Validation",
+      "hasFirecrawl": true,
+      "hasMemory": true,
+      "hasTrustValidation": false,
+      "avgQuality": 64,
+      "citationResolution": "65.0%",
+      "epistemicBreaches": 4,
+      "readinessState": "BLOCKED"
+    }
+  ]
+}
