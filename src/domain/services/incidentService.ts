@@ -28,13 +28,26 @@ export interface UpdateEpistemicFieldDTO {
 }
 
 /**
- * Generates next sequential incident number scoped to current year.
+ * Generates next sequential incident number scoped to current year without collision.
  */
 async function generateIncidentNumber(): Promise<string> {
   const currentYear = new Date().getFullYear();
-  const count = await prisma.incident.count();
-  const seq = String(count + 1).padStart(3, '0');
-  return `INC-${currentYear}-${seq}`;
+  const incidents = await prisma.incident.findMany({
+    where: { incidentNumber: { startsWith: `INC-${currentYear}-` } },
+    select: { incidentNumber: true },
+  });
+
+  let maxSeq = 0;
+  for (const inc of incidents) {
+    const match = inc.incidentNumber.match(/INC-\d{4}-(\d+)/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxSeq) maxSeq = num;
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  return `INC-${currentYear}-${String(nextSeq).padStart(3, '0')}`;
 }
 
 /**
@@ -145,7 +158,7 @@ export async function updateEpistemicStatus(user: AuthUser, dto: UpdateEpistemic
     if (dto.details !== undefined) updateData.mitigationDetails = dto.details;
   }
 
-  // 4. Update incident without nested include to avoid transaction requirement
+  // 4. Update incident
   const updatedIncident = await prisma.incident.update({
     where: { id: dto.incidentId },
     data: updateData,
