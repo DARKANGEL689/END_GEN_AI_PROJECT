@@ -300,7 +300,14 @@ ${input.bodyText}
    * Generates a self-contained, publication-ready HTML document with dark enterprise styling.
    */
   async exportHtml(input: ExportDraftInput): Promise<string> {
-    const bodyFormatted = input.bodyText
+    const escaped = input.bodyText
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    const bodyFormatted = escaped
       .replace(/## (.*)/g, '<h2 class="text-xl font-bold text-slate-100 mt-6 mb-2">$1</h2>')
       .replace(/# (.*)/g, '<h1 class="text-2xl font-black text-cyan-400 mt-8 mb-3">$1</h1>')
       .replace(/(\[c\d+\])/g, '<span class="px-1.5 py-0.5 text-xs font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800 rounded">$1</span>')
